@@ -1,0 +1,156 @@
+---
+title: "Homework 1 | Bass Model"
+author: "Anna Manasyan"
+date: "10/01/2023"
+output: pdf_document
+---
+
+  From TIME's list of the best inventions of 2022, the following analysis focuses on Sony's LinkBuds - innovative wireless headphones that don't block the ear canal and provide smart features like touch controls, adaptive volume, and auto-pause, making them an optimal choice for Gen Z members who use headphones extensively and want to combine technology with the natural world (Time, 2022). 
+
+  As a look-alike innovation from the past, I have chosen the standard headphones. The primary purpose of headphones is to deliver high-quality sound directly to the ears, isolating the listener from external noises and allowing them to enjoy music, podcasts, audiobooks, phone calls, and other audio content without disturbing others or being disturbed by their surroundings. While LinkBuds offer some innovative and cool features that improve the user experience, they are still built on these key principles. Thus, LinkBuds share a common purpose with standard headphones and can be compared. 
+
+  The data used for this analysis focuses on unit shipments of headphones worldwide from 2013 to 2021. It was retrieved from Statista and prepared by Futuresource. 
+
+  Using global sales data of headphones over nine years, the code below will estimate Bass model parameters, make predictions of the diffusion of the innovation, and estimate the potential market share by time period of LinkBuds worldwide.
+
+
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, warning = FALSE, message = FALSE)
+library(ggplot2)
+library(ggpubr)
+library(diffusion)
+library(knitr)
+library(readxl)
+```
+
+## Data Manipulation
+```{r}
+data = read_xlsx("headphone_sales_worldwide.xlsx")[1:2]
+colnames(data) <- c("Year", "Shipments")
+data$Year <- as.integer(data$Year)
+
+#applying min/max
+scale_values <- function(x){(x-min(x))/(max(x)-min(x))}
+data$scaled_shipments <- round(scale_values(data$Shipments), digits = 2)
+```
+Note: A decision to apply min/max scaler was made, as data varied significantly from year to year, which caused errors in parameter estimation. Min/max scaler maps the range of features to [0,1].
+
+\newpage
+
+## Visualizing the Data
+```{r}
+ggplot(data , aes(x = Year, y = Shipments)) + geom_bar(stat = 'identity')+
+labs(title = 'Unit Shipments of Headphones Worldwide from 2013 to 2021', x= ' ', y = 'shipments (million units)')+
+scale_x_continuous(breaks = 2013:2021, labels = 2013:2021)+
+theme(plot.title = element_text(hjust = 0.5))
+```
+
+## Bass model parameters for the look-alike innovation.
+
+#### Defining functions for f (t) and F(t):
+- bass.f - the fraction of the total market that adopts at time t; 
+- bass.F - the fraction of the total market that has adopted up to and including time t;
+- p - innovation rate;
+- q - imitation rate
+```{r}
+bass.f <- function(t,p,q){
+((p+q)^2/p)*exp(-(p+q)*t)/
+(1+(q/p)*exp(-(p+q)*t))^2
+}
+
+bass.F <- function(t,p,q){
+(1-exp(-(p+q)*t))/
+(1+(q/p)*exp(-(p+q)*t))
+}
+```
+
+### Parameter Estimation Using NLS
+
+```{r}
+sales = data$scaled_shipments
+t = 1:length(sales)
+
+bass_m = nls(sales ~ m*(((p+q)^2/p)*exp(-(p+q)*t))/
+        (1+(q/p)*exp(-(p+q)*t))^2,
+        start=c(list(m=sum(sales),p=0.02,q=0.4)))
+
+#retrieving p, q, m
+result<-summary(bass_m)$coefficients
+m = result[1,1]
+p = result[2,1]
+q = result[3,1]
+
+summary(bass_m)
+```
+
+From the summary, we can see that the values for innovation rate, imitation rate and market potential are 0.002710, 0.545832 and 7.834676 respectively. 
+
+```{r}
+time_ad <- ggplot(data.frame(t = c(1:9)), aes(t)) +
+stat_function(fun = bass.f, args = c(p, q)) +
+labs(title = 'f(t)')
+
+headphone_sales <- ggplot(data, aes(x = Year, y = Shipments)) +
+geom_bar(stat = 'identity') + labs(x = " ", y = "shipments (million units)")
+
+ggarrange(time_ad, headphone_sales)
+```
+
+## Estimating number of adopters by time
+
+We take calculate f(t) with the estimated rate of innovation and imitation, then multiply by the predicted market potential. These are plotted as red dots on the figure for various t-s. 
+
+As data was scaled, estimated market potential by NLS makes little sense in this case, so let's replace it with something more insightful. 
+
+### Option 1: Market Estimate from Statista\
+According to Statista, the volume of the Headphones market will reach 1.3 billion pieces by 2028 (Statista, 2023), let's use that number as a rough estimate of the market potential for LinkBuds. 
+```{r}
+data$pred_sales = bass.f(1:9, p, q)*1300
+ggplot(data, aes(x = Year, y = Shipments)) +
+geom_bar(stat = 'identity') +
+geom_point(mapping = aes(x=Year, y=pred_sales), color = 'red')+
+labs( x= ' ', y = 'shipments (million units)')+scale_x_continuous(breaks = 2013:2021, labels = 2013:2021)
+```
+
+### Option 2: Fermi Estimation\
+- GP - global population - 8.05 Billion (Worldometers, 2023)
+- MU - % of population that uses mobile phones - 69.1%  (DataReportal, 2023)
+- H - average number of headphones bought in a year by a single person - 0.52 (HeadphonesAddict, 2022)
+
+Note: I decided to include the % of population that utilizes mobile phone in the calculation, as headphones must be used in connection with some other electronic device. Phones are the most common type and I found insightful data.
+
+### FORMULA
+*m = GP x MU x H*
+
+
+```{r}
+m = 8100 * 0.691 * 0.52
+data$pred_sales_f = bass.f(1:9, p, q)*m
+ggplot(data, aes(x = Year, y = Shipments)) +
+geom_bar(stat = 'identity') +
+geom_point(mapping = aes(x=Year, y=pred_sales_f), color = 'red')+
+labs( x= ' ', y = 'shipments (million units)')+scale_x_continuous(breaks = 2013:2021, labels = 2013:2021)
+```
+
+## Sources\
+
+*Innovation:*
+
+- Sony LinkBuds: The 200 Best Inventions of 2022. (2022, November 10). Time. https://time.com/collection/best-inventions-2022/6230012/sony-linkbuds/
+
+
+*Look-Alike Innovation:*
+
+- Laricchia, F. (2023). Global headphone unit shipments 2013-2020. Statista. https://www.statista.com/statistics/236075/revenue-of-headphone-shipments-in-the-united-states/
+
+
+*Market Potential Estimation:*
+
+- Headphones - Worldwide | Statista Market Forecast. (2023). Statista. https://www.statista.com/outlook/cmo/consumer-electronics/tv-radio-multimedia/headphones/worldwide#:~:text=In%20the%20Headphones%20market%2C%20volume
+
+- HeadphonesAddict. (2022, March 30). 31+ Important Headphones Statistics & More (2022). Headphones Addict. https://headphonesaddict.com/headphones-statistics/
+
+- DataReportal. (2023). Digital around the World. DataReportal – Global Digital Insights. https://datareportal.com/global-digital-overview
+
+- Worldometer. (2023). World Population Clock.  https://www.worldometers.info/world-population/#:~:text=8%20Billion%20(2022)
